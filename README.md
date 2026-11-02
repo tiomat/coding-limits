@@ -14,7 +14,7 @@
 
 Отдельный вход не нужен: приложение использует авторизацию CLI.
 
-- **Kimi:** `/login` в Kimi Code CLI. Читается `~/.kimi/credentials/kimi-code.json`; истёкший OAuth-токен обновляется через тот же публичный OAuth client ID, что использует CLI. Можно переопределить токен через `KIMI_LIMITS_TOKEN` или `KIMI_API_KEY`.
+- **Kimi:** `/login` в Kimi Code CLI. Читается актуальный файл креденшелсов Kimi Code 2.4+: `$KIMI_CODE_HOME/credentials/kimi-code-env-*.json` (по умолчанию `~/.kimi-code/credentials/`), с fallback на старый путь `~/.kimi/credentials/kimi-code.json`. Истёкший OAuth-токен обновляется через тот же публичный OAuth client ID, что использует CLI; если в файле нет `expires_at`, обновление срабатывает при ответе 401. Можно переопределить токен через `KIMI_LIMITS_TOKEN` или `KIMI_API_KEY`. Показываются окна «5h» и «Month code».
 - **OpenCode Go:** `/connect` в OpenCode. Приложение вызывает `opencode api GET /api/experimental/usage/limits`, поэтому токены не копируются и остаются в хранилище OpenCode. Нужны OpenCode CLI и запущенный штатный background service.
 
 Приложение запрашивает только usage API, не отправляет промпты и не расходует квоту. Это неофициальный проект, не связанный с Moonshot AI или OpenCode; форматы API могут измениться.

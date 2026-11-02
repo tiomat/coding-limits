@@ -27,8 +27,32 @@ enum KimiReader {
   private static let endpoint = URL(string: "https://api.kimi.com/coding/v1/usages")!
   private static let tokenEndpoint = URL(string: "https://auth.kimi.com/api/oauth/token")!
   private static let clientID = "17e5f671-d194-4dfb-9706-5516cb48c098"
-  private static let credentialFile = FileManager.default.homeDirectoryForCurrentUser
-    .appending(path: ".kimi/credentials/kimi-code.json")
+
+  /// Kimi Code 2.4+ keeps credentials in `$KIMI_CODE_HOME/credentials`
+  /// (default `~/.kimi-code/credentials`) as `kimi-code-env-<hash>.json`;
+  /// older CLIs used `~/.kimi/credentials/kimi-code.json`.
+  private static func credentialFile() -> URL {
+    let home = ProcessInfo.processInfo.environment["KIMI_CODE_HOME"]
+    let directory = (home?.isEmpty == false)
+      ? URL(fileURLWithPath: home!).appending(path: "credentials")
+      : FileManager.default.homeDirectoryForCurrentUser.appending(path: ".kimi-code/credentials")
+    if let file = newestCredentialFile(in: directory) { return file }
+    return FileManager.default.homeDirectoryForCurrentUser
+      .appending(path: ".kimi/credentials/kimi-code.json")
+  }
+
+  private static func newestCredentialFile(in directory: URL) -> URL? {
+    let keys: Set<URLResourceKey> = [.contentModificationDateKey]
+    guard let files = try? FileManager.default.contentsOfDirectory(
+      at: directory, includingPropertiesForKeys: Array(keys)
+    ) else { return nil }
+    return files
+      .filter { $0.lastPathComponent.hasPrefix("kimi-code") && $0.pathExtension == "json" }
+      .max {
+        ((try? $0.resourceValues(forKeys: keys))?.contentModificationDate ?? .distantPast)
+        < ((try? $1.resourceValues(forKeys: keys))?.contentModificationDate ?? .distantPast)
+      }
+  }
 
   static func fetch() async throws -> ProviderSnapshot {
     let (data, status) = try await call()
@@ -44,14 +68,14 @@ enum KimiReader {
       // usage/limits shape handled below.
       let labels = [
         "limit_5h": "5h",
-        "limit_month_total": "Month total",
         "limit_month_code": "Month code",
       ]
       for (key, value) in usages {
-        guard let data = value as? [String: Any],
+        guard let label = labels[key],
+              let data = value as? [String: Any],
               let ratio = number(data["used_ratio"]) else { continue }
         windows.append(UsageWindow(
-          title: labels[key] ?? key,
+          title: label,
           usedPercent: ratio * 100,
           resetsAt: resetDate(data)
         ))
@@ -85,7 +109,16 @@ enum KimiReader {
       credentials = try await refresh(refreshToken)
       try save(credentials)
     }
-    return try await request(token: credentials.accessToken)
+    var result = try await request(token: credentials.accessToken)
+    // Some credential files carry no expires_at, so a stale access token can
+    // slip past the check above; recover by refreshing once and retrying.
+    if result.1 == 401 || result.1 == 403,
+       let refreshToken = credentials.refreshToken, !refreshToken.isEmpty {
+      credentials = try await refresh(refreshToken)
+      try save(credentials)
+      result = try await request(token: credentials.accessToken)
+    }
+    return result
   }
 
   private static func request(token: String) async throws -> (Data, Int) {
@@ -104,7 +137,7 @@ enum KimiReader {
         accessToken: token, refreshToken: nil, expiresAt: nil, scope: nil, tokenType: nil, expiresIn: nil
       )
     }
-    guard let data = try? Data(contentsOf: credentialFile),
+    guard let data = try? Data(contentsOf: credentialFile()),
           let credentials = try? JSONDecoder().decode(KimiCredentials.self, from: data),
           !credentials.accessToken.isEmpty else {
       throw UsageError.noCredentials("Kimi Code не авторизован. Выполните /login в Kimi Code CLI.")
@@ -138,6 +171,7 @@ enum KimiReader {
   }
 
   private static func save(_ credentials: KimiCredentials) throws {
+    let credentialFile = credentialFile()
     let directory = credentialFile.deletingLastPathComponent()
     try FileManager.default.createDirectory(
       at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]

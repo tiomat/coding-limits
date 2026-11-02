@@ -28,7 +28,7 @@ enum Provider: String, CaseIterable {
   var shortTitle: String { self == .kimi ? "K" : "G" }
   var dashboard: URL {
     switch self {
-    case .kimi: URL(string: "https://www.kimi.com/code")!
+    case .kimi: URL(string: "https://www.kimi.ai/code/console")!
     case .go: URL(string: "https://opencode.ai/auth")!
     }
   }
